@@ -2,696 +2,512 @@
 
 ## 1. 文档目标
 
-本文档用于将 [`requirements.md`](D:/code/live-translator/requirements.md#L1) 中的产品需求收敛为可执行的技术方案，并给出：
+本文档基于 [`requirements.md`](D:/code/live-translator/requirements.md#L1) 和现有 MVP 原型的验证结果，重新定义项目的工程底座与实现路线。本文档重点回答以下问题：
 
-- MVP 范围定义
-- 系统架构设计
-- 模块职责拆分
-- 技术难点与风险判断
-- 分阶段任务编排计划
+- 现阶段应采用什么技术栈继续开发；
+- 如何把现有原型迁移到最新的 `WXT + React` 架构；
+- 如何同时满足 `Chrome` 与 `Edge` 的上架要求；
+- 哪些能力属于本轮迁移范围，哪些能力明确延后。
 
-当前仓库尚未进入实现阶段，本文档优先解决“先做什么、暂时不做什么、按什么顺序做”的问题。
+当前任务不再是从零定义一个纯手写 `Chrome MV3` 扩展，而是把已经验证过主链路的原型迁移到更适合持续开发和发布的工程结构中。
 
 ## 2. 项目现状
 
-当前仓库仅包含以下内容：
+截至 `2026-04-20`，项目存在两个并行状态：
 
-- `manifest.json`：Manifest V3 扩展声明
-- `requirements.md`：完整需求规格
-- `design.md`：设计文档
+- 仓库根目录仍以需求文档和旧版实现计划为主，技术路线基于手写 `manifest.json + HTML/CSS/JS`。
+- 本地工作树 `D:\code\live-translator\.worktrees\live-translator-mvp` 已经存在一版可运行的 MVP 原型，实现了以下最小闭环：
+  `系统音频采集 -> 分片 -> Whisper 转写 -> OpenAI 翻译 -> Popup / Overlay 展示`。
 
-当前 `manifest.json` 中声明的以下入口文件均未创建：
+已验证的信息如下：
 
-- `background/background.js`
-- `popup/popup.html`
-- `content/content.js`
-- `icons/icon128.png`
+- 原型为纯 `Chrome MV3` 实现；
+- 原型当前只支持 `Whisper + OpenAI`；
+- 原型已有单元测试，并在本次检查中通过；
+- 原型的 `Popup` 与 `Overlay` 仍是原生 `HTML + CSS + JavaScript`；
+- 现有设计文档和实施计划已经落后于目标技术路线。
 
-因此项目当前状态应定义为“规格阶段”，而不是“可运行原型”。
+因此，项目当前阶段应定义为：
 
-## 3. 需求拆解
+**“基于已验证原型，迁移到最新 `WXT + React` 工程底座，并为 `Chrome / Edge` 发布做准备。”**
 
-原始需求可以拆成 6 个子系统：
+## 3. 设计结论
 
-1. 系统音频捕获
-2. 音频预处理
-3. 语音识别
-4. 文本翻译
-5. 结果展示
-6. 配置与错误处理
+本轮设计结论如下：
 
-从交付角度看，这 6 个子系统不是同等优先级。
+1. 使用最新 `WXT` 作为扩展工程底座。
+   截至本文档更新时间，已核对到的 WXT 官方版本为 `0.20.25`。
+2. 使用 `React` 重写 `Popup` 与 `Overlay` 两类界面入口。
+3. 使用 `TypeScript` 承载新的入口层、UI 层和共享模块。
+4. 保留现有 MVP 原型已经验证过的运行时职责边界：
+   `Background / Offscreen / Content / Shared / Provider`。
+5. 本轮迁移不做业务扩容，不新增 `DeepL`、说话人分离、服务端代理或高级音频预处理。
+6. 交付目标不是“重做一个新产品”，而是“把现有可验证 MVP 迁移到可持续开发、可上架的工程结构”。
 
-### 3.1 核心链路
+结论上，`WXT + React` 路线没有阻塞性问题，可以作为后续实现文档与实际开发的基线。
 
-首版必须打通的最小闭环是：
+## 4. 范围定义
 
-`采集音频 -> 分片 -> 语音识别 -> 文本翻译 -> Popup/Overlay 展示`
+### 4.1 本轮包含
 
-只要这条链路能稳定跑通，项目就具备 MVP 价值。
+1. 用最新 `WXT` 重建扩展工程底座。
+2. 使用 `React` 重写 `Popup`。
+3. 使用 `React` 重写页面内 `Overlay`。
+4. 把 `Background`、`Offscreen`、`Shared` 与 `Provider` 逻辑迁入新工程。
+5. 保留现有 MVP 主链路：`Whisper + OpenAI`。
+6. 提供同时面向 `Chrome` 与 `Edge` 的构建、打包与手工验收流程。
+7. 保留并迁移现有单元测试基础。
 
-### 3.2 高复杂度增强项
+### 4.2 本轮不包含
 
-以下功能不适合作为首版必须项：
+1. `DeepL`、`Google Translate`、`Gemini`、`Claude` 等新增 Provider。
+2. 说话人分离（Speaker Diarization）。
+3. 高级降噪、音频增强、浏览器侧复杂预处理。
+4. 后端代理、密钥托管、统一监控平台。
+5. 多会话并发与跨设备同步敏感密钥。
+6. 独立的设置页（Options Page）和复杂账户体系。
 
-- 说话人分离
-- 多识别引擎一次性全支持
-- 多翻译引擎一次性全支持
-- 浏览器侧强预处理能力
-- 真正安全的长期 API Key 持久化
+## 5. 技术方案比较
 
-这些内容应放入二期，否则项目会在首轮实现阶段显著失控。
-
-## 4. MVP 范围
-
-### 4.1 MVP 包含
-
-1. Chrome MV3 扩展基本骨架
-2. Popup 启动/停止翻译
-3. 通过屏幕共享获取系统音频
-4. 音频按固定窗口分片
-5. 接入 1 个语音识别引擎
-6. 接入 1 个翻译引擎
-7. Popup 中实时显示最近翻译结果
-8. Overlay 悬浮层显示翻译结果
-9. 基础配置保存
-10. 基础错误提示和日志记录
-
-### 4.2 MVP 不包含
-
-1. 说话人分离
-2. 复杂降噪与高级音频增强
-3. 多模型智能路由
-4. 真正加密级别的密钥长期持久化
-5. 多会话并发
-6. 跨设备同步敏感密钥
-
-### 4.3 MVP 推荐首版 Provider
-
-为了降低集成复杂度，首版建议只支持：
-
-- 语音识别：`OpenAI Whisper`
-- 翻译引擎：`OpenAI GPT` 或 `DeepL`
-
-推荐优先级：
-
-1. `Whisper + OpenAI GPT`
-2. `Whisper + DeepL`
-
-如果目标是尽快打通单一供应商链路，则优先 `Whisper + OpenAI GPT`。
-如果目标是降低翻译提示词与响应解析复杂度，则优先 `Whisper + DeepL`。
-
-## 5. 技术方案选择
-
-### 方案 A：纯扩展 MVP 方案
+### 方案 A：`WXT + React + TypeScript`，保留现有业务逻辑边界
 
 特点：
 
-- 所有逻辑放在浏览器扩展内
-- 使用 `Popup + Service Worker + Offscreen Document + Content Script`
-- API 直接由扩展调用第三方服务
+- 用 `WXT` 接管工程、构建与产物生成；
+- `Popup` 与 `Overlay` 改为 `React`；
+- `Background`、`Offscreen`、`Provider` 逻辑按现有边界迁移；
+- 新入口与共享模块采用 `TypeScript`；
+- 已验证的音频链路与消息链路尽量不在迁移首轮做重写式改造。
 
 优点：
 
-- 启动快
-- 依赖少
-- 最适合做首版原型
+- 风险最低；
+- 能同时满足“换框架”和“保住主链路”；
+- 最适合当前阶段。
 
 缺点：
 
-- 密钥安全边界弱
-- 浏览器侧音频处理能力有限
-- 可观测性与服务治理能力较弱
+- 迁移期间会存在“新 UI + 旧业务逻辑逐步转移”的过渡态；
+- 部分模块会经历先迁入、后整理的两阶段演进。
 
-### 方案 B：纯扩展全量方案
+### 方案 B：`WXT + React + TypeScript` 全量重写
 
 特点：
 
-- 一次性实现需求文档中的大部分能力
+- 所有模块一次性全面迁移到新的结构和类型系统中；
+- 消息协议、Provider、状态管理全部同步重构。
 
 优点：
 
-- 规格覆盖完整
+- 技术面貌统一；
+- 代码风格一致。
 
 缺点：
 
-- 项目跨度过大
-- 首版失败概率高
-- 调试与稳定性成本过高
+- 迁移风险大；
+- 容易把“工程升级”演变为“业务重做”；
+- 对当前 MVP 验证节奏不利。
 
-### 方案 C：扩展 + 服务端代理方案
+### 方案 C：`WXT + React` + 业务重构 + 能力扩容
 
 特点：
 
-- 扩展负责采集、展示、会话控制
-- 服务端负责密钥管理、转写/翻译代理、日志与风控
+- 在迁移阶段同步增加 Provider、配置页、音频增强等功能。
 
 优点：
 
-- 安全边界更合理
-- 后期可扩展性最好
-- 方便做统一监控和重试策略
+- 看起来“一次做完”。
 
 缺点：
 
-- 初期开发成本更高
-- 需要部署后端
+- 超出当前项目控制范围；
+- 回归成本和排查成本最高；
+- 不适合作为首轮迁移方案。
 
 ### 结论
 
-当前推荐路线：
+采用 **方案 A**。
 
-1. 首版采用 `方案 A`
-2. 二期演进到 `方案 C`
+用户已经明确要求使用最新 `WXT` 和 `React`，因此本轮唯一合理的工程策略是：
 
-不建议采用 `方案 B`。
+**“在 `WXT + React` 下重建入口层与 UI 层，同时尽量保留现有 MVP 原型已经验证过的运行时链路。”**
 
-## 6. 架构设计
+## 6. 总体架构
 
-### 6.1 总体架构
+### 6.1 架构组件
 
-MVP 采用以下组件：
+迁移后的系统由以下部分组成：
 
-- `Popup UI`
-- `Service Worker`
-- `Offscreen Document`
-- `Content Script / Overlay`
+- `WXT Config`
+- `Background Service Worker`
+- `Offscreen Page`
+- `Content Script + React Overlay`
+- `React Popup`
 - `Speech Provider Adapter`
 - `Translation Provider Adapter`
-- `Config Store`
-- `Session State / Event Bus`
+- `Shared Contracts / Storage / Logger`
 
-整体数据流：
+### 6.2 总体数据流
 
-`Popup -> Service Worker -> Offscreen Document -> Speech Provider -> Translation Provider -> Service Worker -> Popup / Overlay`
+整体数据流保持不变：
 
-### 6.2 组件职责
+`Popup -> Background -> Offscreen -> Speech Provider -> Translation Provider -> Background -> Popup / Overlay`
 
-#### Popup UI
+区别在于：
 
-职责：
+- `Popup` 将由原生页面改为 `React`；
+- `Overlay` 将由原生 DOM 脚本改为 `React` 挂载；
+- `manifest.json` 不再作为源码维护，而由 `WXT` 在构建时生成；
+- 构建与打包由 `WXT` 管理，而不是手工维护扩展目录。
 
-- 展示配置界面
-- 提供开始/停止按钮
-- 展示当前状态
-- 展示最近翻译结果
-- 展示错误消息
+## 7. WXT 架构决策
 
-边界：
+### 7.1 配置来源
 
-- 不直接处理音频
-- 不直接调用外部 API
-- 所有运行态操作通过消息发送给 Service Worker
+迁移后不再把根目录 `manifest.json` 作为运行时真实来源。新的事实来源如下：
 
-#### Service Worker
+1. `wxt.config.ts`
+2. `entrypoints/`
+3. `public/`
 
-职责：
+这意味着权限、宿主权限、Action、图标、浏览器目标等配置都应进入 `WXT` 配置，而不是继续手写根目录 `manifest.json`。
 
-- 管理翻译会话状态
-- 协调 Popup、Offscreen、Content Script 之间的消息
-- 负责调用识别与翻译 Provider
-- 记录错误与日志
-- 管理运行期缓存
+### 7.2 入口组织
 
-边界：
+建议使用以下入口：
 
-- 不直接访问 DOM
-- 不承担音频采集与编码实现
-
-#### Offscreen Document
-
-职责：
-
-- 调用 `getDisplayMedia`
-- 接入音频流
-- 进行分片
-- 执行轻量预处理
-- 将分片后的音频数据发送给 Service Worker
-
-边界：
-
-- 不负责 UI
-- 不承担配置持久化
-
-#### Content Script / Overlay
-
-职责：
-
-- 注入悬浮显示层
-- 渲染结果列表
-- 处理拖拽与关闭
-
-边界：
-
-- 不直接请求外部 API
-- 不维护完整业务状态
-
-#### Speech Provider Adapter
-
-职责：
-
-- 封装音频识别请求
-- 屏蔽具体 Provider 差异
-- 输出统一识别结果结构
-
-#### Translation Provider Adapter
-
-职责：
-
-- 封装文本翻译请求
-- 屏蔽具体 Provider 差异
-- 输出统一翻译结果结构
-
-#### Config Store
-
-职责：
-
-- 保存非敏感配置
-- 读取当前运行配置
-- 向 UI 提供配置表单默认值
-
-### 6.3 可扩展性约束
-
-首版虽然按 MVP 实现，但代码结构必须为二期能力预留扩展点。
-
-约束如下：
-
-1. Provider 必须通过统一接口接入，禁止在业务流程中直接写死第三方 API 调用细节。
-2. 识别与翻译能力必须采用注册表或工厂模式装配，便于后续增加 `Google Speech-to-Text`、`DeepL`、`Claude`、`Gemini` 等实现。
-3. Popup、Overlay、Service Worker、Offscreen 之间的消息协议必须集中定义，禁止在各处散落硬编码消息名。
-4. 会话状态必须集中由 `session-manager` 管理，避免多个上下文各自维护状态副本。
-5. 配置结构必须带版本意识，后续新增字段时应支持迁移或默认值补全。
-6. 结果数据结构首版即预留 `speakerLabel` 等增强字段，但不在 MVP 中强依赖。
-7. 存储能力必须按用途分层：`sync`、`session`、`local` 分开封装，避免未来更换安全策略时全局改动。
-8. UI 展示与业务状态解耦，Popup 与 Overlay 只消费标准结果对象，不直接依赖 Provider 返回格式。
-
-## 7. 目录规划
-
-建议的首版目录结构如下：
-
-```text
-live-translator/
-  manifest.json
-  design.md
-  requirements.md
-  background/
-    background.js
-    session-manager.js
-    message-router.js
-    providers/
-      speech/
-        whisper.js
-      translation/
-        openai.js
-        deepl.js
-  popup/
-    popup.html
-    popup.css
-    popup.js
-  content/
-    content.js
-    overlay.js
-    overlay.css
-  offscreen/
-    offscreen.html
-    offscreen.js
-    audio-capture.js
-    audio-chunker.js
-  shared/
-    constants.js
-    messages.js
-    storage.js
-    logger.js
-    types.js
-  icons/
-    icon128.png
-```
-
-设计原则：
-
-- `shared/` 只放跨端复用的常量、消息协议和工具模块
-- `background/` 负责状态与服务协调
-- `offscreen/` 负责媒体能力
-- `popup/` 与 `content/` 只负责 UI 与交互
-
-## 8. 关键数据设计
-
-### 8.1 配置结构
-
-建议配置结构：
-
-```js
-{
-  speechProvider: "whisper",
-  translationProvider: "openai",
-  sourceLanguage: "auto",
-  targetLanguage: "zh-CN",
-  overlayEnabled: true,
-  chunkDurationMs: 4000,
-  llmModel: "gpt-4o-mini",
-  customPrompt: "",
-  apiKeys: {
-    whisper: "",
-    openai: "",
-    deepl: ""
-  }
-}
-```
+- `entrypoints/background/index.ts`
+- `entrypoints/popup/index.html`
+- `entrypoints/popup/main.tsx`
+- `entrypoints/content/index.ts`
+- `entrypoints/offscreen/index.html`
+- `entrypoints/offscreen/main.ts`
 
 其中：
 
-- 非敏感配置可持久化到 `chrome.storage.sync`
-- 敏感字段不应默认进入 `sync`
+- `background` 负责会话调度和消息路由；
+- `popup` 挂载 `React` 应用；
+- `content` 负责注入并挂载页面内 `React Overlay`；
+- `offscreen` 负责 `getDisplayMedia`、音频采集与分片。
 
-### 8.2 会话状态结构
+### 7.3 Overlay 挂载方式
 
-```js
-{
-  status: "idle" | "starting" | "capturing" | "processing" | "error",
-  startedAt: 0,
-  lastError: null,
-  lastTranscript: "",
-  lastTranslation: "",
-  results: []
-}
+`Overlay` 必须采用带隔离边界的挂载方式。
+
+设计要求：
+
+- 使用 `WXT` 的内容脚本 UI 能力；
+- 优先使用 `ShadowRoot` 隔离样式；
+- 页面样式不得污染扩展的 `Overlay`；
+- `Overlay` 只消费标准结果数据，不直接依赖 Provider 响应格式。
+
+### 7.4 Offscreen 页面
+
+`Offscreen` 保持为独立页面，而不是塞进 `Popup` 或 `Content Script` 中。
+
+原因如下：
+
+- `getDisplayMedia()` 与 `MediaRecorder` 更适合在独立上下文中维护生命周期；
+- 音频采集与 UI 解耦后，故障边界更清晰；
+- 与现有 MVP 原型的职责边界一致，迁移风险更低。
+
+## 8. 目录规划
+
+建议的新目录结构如下：
+
+```text
+live-translator/
+  docs/
+    superpowers/
+      plans/
+        2026-04-10-live-translator-mvp.md
+  entrypoints/
+    background/
+      index.ts
+    content/
+      index.ts
+    offscreen/
+      index.html
+      main.ts
+    popup/
+      index.html
+      main.tsx
+  public/
+    icon-16.png
+    icon-32.png
+    icon-48.png
+    icon-128.png
+  src/
+    background/
+      error-mapper.ts
+      message-router.ts
+      session-manager.ts
+      speech-service.ts
+      translation-service.ts
+      providers/
+        speech/
+          base.ts
+          index.ts
+          whisper.ts
+        translation/
+          base.ts
+          index.ts
+          openai.ts
+    offscreen/
+      audio-capture.ts
+      audio-chunker.ts
+    shared/
+      constants.ts
+      logger.ts
+      messages.ts
+      storage.ts
+      types.ts
+    ui/
+      popup/
+        App.tsx
+        components/
+      overlay/
+        OverlayApp.tsx
+        components/
+      hooks/
+        use-session-state.ts
+  tests/
+    background/
+    offscreen/
+    shared/
+    setup/
+  package.json
+  tsconfig.json
+  wxt.config.ts
 ```
 
-### 8.3 结果结构
+目录原则如下：
 
-```js
-{
-  id: "uuid",
-  createdAt: 0,
-  transcript: "source text",
-  translation: "translated text",
-  sourceLanguage: "en",
-  targetLanguage: "zh-CN",
-  speakerLabel: null
-}
-```
+- `entrypoints/` 只负责运行时入口与挂载；
+- `src/background/` 只负责业务调度与 Provider 调用；
+- `src/offscreen/` 只负责采集与分片；
+- `src/shared/` 只负责跨上下文共享的契约、存储与日志；
+- `src/ui/` 只负责 React 界面；
+- 测试目录按职责拆分，不混入运行时代码目录。
 
-首版保留 `speakerLabel` 字段，但默认不启用说话人分离逻辑，便于二期扩展。
+## 9. 组件职责
 
-## 9. 关键技术判断
+### 9.1 Background Service Worker
 
-### 9.1 系统音频采集
+职责：
 
-系统音频采集是项目第一风险点。
+- 管理翻译会话状态；
+- 协调 `Popup`、`Content`、`Offscreen`；
+- 调用语音识别与翻译 Provider；
+- 推送标准化结果；
+- 记录错误与日志。
 
-原因：
+边界：
 
-- 必须依赖浏览器和系统层的屏幕共享能力
-- 用户必须主动授权
-- 是否包含系统音频与平台有关
-- 相关调用必须放在合适的扩展上下文中执行
-- `getDisplayMedia()` 实际上要求提供视频轨，请求参数不能将 `video` 设为 `false`
+- 不直接处理 DOM；
+- 不直接承担音频采集实现；
+- 不把 UI 状态与业务状态混在一起。
 
-设计结论：
+### 9.2 Offscreen Page
 
-- MVP 必须首先验证 `Offscreen Document + getDisplayMedia` 链路
-- 实现时应使用 `getDisplayMedia({ video: true, audio: true })` 或等价约束，然后主动忽略视频轨，只消费音频轨
-- 如果采集链路不稳定，后续所有模块都没有意义
+职责：
 
-### 9.2 音频预处理
+- 调用 `getDisplayMedia()`；
+- 管理 `MediaStream` 生命周期；
+- 负责音频分片与轻量预处理；
+- 向 `Background` 推送标准音频块。
 
-原需求中的预处理目标过于理想化，首版建议降级为：
+边界：
 
-1. 固定时长分片
-2. 基础静音检测
-3. 基础格式适配
+- 不负责结果渲染；
+- 不负责配置表单与展示；
+- 不直接请求翻译 Provider。
 
-不建议首版承诺：
+### 9.3 React Popup
 
-- 强降噪
-- 明确 dBFS 目标
-- 200ms 全流程硬实时指标
+职责：
 
-### 9.3 API Key 安全
+- 展示 API Key 与基础配置表单；
+- 发起开始 / 停止翻译动作；
+- 订阅会话状态；
+- 展示最近结果与错误信息。
 
-原需求要求“非明文存储”，但在纯扩展模式下：
+边界：
 
-- 前端必须在某个时刻拿到明文才能发请求
-- 持久化秘密本身就意味着存在被读取的风险
+- 不直接请求外部 AI Provider；
+- 不直接持有音频流；
+- 所有运行时动作通过消息与存储接口完成。
 
-设计结论：
+### 9.4 React Overlay
 
-- MVP 中将敏感 Key 视为“用户本地配置”
-- 默认仅在当前会话使用或放入受限存储
-- 若要实现真正可接受的安全策略，应在二期接入服务端代理
+职责：
 
-### 9.4 说话人分离
+- 在页面内展示最近翻译结果；
+- 提供最小关闭、拖拽与状态展示能力；
+- 与页面样式隔离。
 
-说话人分离属于高复杂度增强特性，应拆出独立二期项目。
+边界：
 
-原因：
+- 不直接请求 Provider；
+- 不维护完整会话状态；
+- 不与页面业务 DOM 深度耦合。
 
-- 需要额外模型能力
-- 会话级标签一致性复杂
-- UI 需要针对多说话人渲染
-- 测试成本高
+### 9.5 Shared Layer
 
-## 10. 难易度评估
+职责：
 
-### 10.1 低难度
+- 定义消息协议；
+- 定义结果结构与配置结构；
+- 封装 `storage.sync / session / local`；
+- 统一错误日志写入。
 
-- Popup 基础界面
-- 状态栏与错误提示
-- Overlay 基础渲染
-- 最近结果列表
-- 配置表单基础交互
+边界：
 
-### 10.2 中难度
+- 不承担 UI 逻辑；
+- 不承担浏览器入口生命周期。
 
-- 配置读写
-- Service Worker 消息路由
-- 翻译 Provider 接入
-- 去重与结果缓存
-- 错误日志记录
+## 10. 关键技术判断
 
-### 10.3 中高难度
+### 10.1 `WXT + React` 路线可行
 
-- Offscreen 生命周期管理
-- 录音开始/停止状态同步
-- 音频分片与基础格式处理
-- 重试机制与会话恢复
+该路线没有发现阻塞性问题，原因如下：
 
-### 10.4 高难度
+- `WXT` 原生支持 `MV3`、多入口、浏览器目标切换与打包；
+- `React` 适合 `Popup` 与 `Overlay` 的状态渲染；
+- `Chrome` 与 `Edge` 都属于 Chromium 扩展生态，当前 API 路线兼容性足够高；
+- 现有 MVP 原型已经验证了核心业务链路，本轮只是在工程层和 UI 层升级。
 
-- 浏览器侧音频预处理
-- 多 Provider 抽象一致性
-- 稳定的系统音频捕获兼容性
+### 10.2 系统音频采集仍是第一风险点
 
-### 10.5 很高难度
+无论是否迁移到 `WXT`，系统音频采集仍然是首要风险。
 
-- 说话人分离
-- 会话级说话人标签保持
-- 真正安全的密钥长期持久化
-- 大规模兼容性与稳定性治理
+需要继续遵守以下结论：
 
-## 11. 任务编排计划
+- 必须优先保证 `Offscreen + getDisplayMedia()` 链路稳定；
+- 请求参数必须满足浏览器的实际能力约束；
+- 必须把拒绝授权、取消分享、无音频轨等异常视为一等场景。
 
-### 阶段 0：需求收敛与设计冻结
+### 10.3 Overlay 必须做样式隔离
 
-目标：
+原生内容脚本直插 DOM 时，页面样式与扩展样式容易互相污染。迁移到 `React Overlay` 后，必须优先做样式隔离，否则页面复杂样式会导致悬浮层不可控。
 
-- 明确 MVP 与二期边界
-- 冻结首版 Provider 选择
-- 冻结目录结构和消息协议
+### 10.4 `Chrome / Edge` 发布应共用一套 Chromium 构建
 
-输出：
+本项目不应拆成两套代码库。正确做法是：
 
-- 更新后的 `design.md`
-- MVP 范围清单
+- 共用一套 `WXT` 源码；
+- 通过浏览器目标生成不同产物；
+- 在打包前核对生成后的权限与图标配置是否符合两个商店要求。
 
-难度：
+### 10.5 渐进迁移优于一次性重写
 
-- 中
+当前最有价值的资产不是旧的 UI，而是已经验证过的业务链路。因此：
 
-### 阶段 1：扩展骨架搭建
+- 首先迁移工程底座和 UI；
+- 然后迁移共享契约与会话逻辑；
+- 最后再做结构性整理。
 
-目标：
+这比“一次性全量重写”更符合当前项目阶段。
 
-- 创建 MV3 扩展基础结构
-- 补齐 manifest 声明文件
-- 建立 Popup、Service Worker、Content Script、Offscreen 入口
+## 11. 验证策略
 
-输出：
+迁移完成后，至少要完成以下验证：
 
-- 可加载的扩展骨架
+1. 单元测试通过：
+   `shared / background / offscreen` 的核心纯逻辑测试保持可运行。
+2. 类型检查通过：
+   新增的 `TypeScript` 入口、UI 与共享模块无类型错误。
+3. 浏览器构建通过：
+   能分别生成 `Chrome` 与 `Edge` 产物。
+4. 手工烟测通过：
+   - 可启动会话；
+   - 可授予系统音频权限；
+   - 可看到转写与翻译结果；
+   - `Popup` 与 `Overlay` 同步更新；
+   - 缺少密钥、取消授权等异常路径提示清晰。
 
-前置依赖：
+## 12. 风险与缓解
 
-- 阶段 0 完成
+### 风险 1：WXT 入口映射错误
 
-难度：
+表现：
 
-- 低
+- `Background`、`Content`、`Offscreen` 实际没有被正确打包或注入。
 
-### 阶段 2：音频捕获链路验证
+缓解：
 
-目标：
+- 迁移首轮先只建立最小入口；
+- 每完成一个入口就执行构建验证；
+- 对照生成后的 `manifest` 检查权限与入口是否正确。
 
-- 建立 Popup 启动会话能力
-- 建立 Offscreen 文档
-- 打通 `getDisplayMedia` 采集系统音频
-- 建立基础音频分片
+### 风险 2：React Overlay 生命周期不稳定
 
-输出：
+表现：
 
-- 可获取音频分片的最小闭环
+- 页面切换后悬浮层重复挂载、丢失或样式错乱。
 
-前置依赖：
+缓解：
 
-- 阶段 1 完成
+- 内容脚本只负责单一挂载点；
+- 使用标准结果流驱动渲染；
+- 明确挂载、卸载与隐藏逻辑。
 
-难度：
+### 风险 3：Offscreen 页面路径或权限错误
 
-- 中高
+表现：
 
-### 阶段 3：语音识别接入
+- `chrome.offscreen.createDocument()` 调用失败；
+- 运行时找不到 `offscreen` 页面。
 
-目标：
+缓解：
 
-- 接入单一 Speech Provider
-- 完成音频上传、响应解析、空结果过滤
-- 加入 4xx/5xx 基础错误处理
+- 把 `offscreen` 入口作为单独页面维护；
+- 在构建后核对实际产物路径；
+- 用手工烟测覆盖授权链路。
 
-输出：
+### 风险 4：迁移时顺手改太多
 
-- 可将音频转为文本
+表现：
 
-前置依赖：
+- 业务回归难以定位；
+- 文档与实现多次偏离。
 
-- 阶段 2 完成
+缓解：
 
-难度：
+- 本轮只迁移工程底座与 UI；
+- Provider 能力与高级功能延后；
+- 严格按实施计划分步推进。
 
-- 中
+## 13. 分阶段实施建议
 
-### 阶段 4：文本翻译接入
+### 阶段 1：工程底座迁移
 
-目标：
+- 建立 `WXT + React + TypeScript` 工程；
+- 配置 `Chrome / Edge` 构建目标；
+- 建立入口与图标、构建脚本、测试脚本。
 
-- 接入单一 Translation Provider
-- 处理源语言/目标语言参数
-- 处理重复文本跳过逻辑
+### 阶段 2：运行时迁移
 
-输出：
+- 迁移 `shared`、`background`、`offscreen`；
+- 保住 `Whisper + OpenAI` 主链路；
+- 补齐最小类型与测试。
 
-- 可将文本实时翻译
+### 阶段 3：UI 迁移
 
-前置依赖：
+- 用 `React` 重建 `Popup`；
+- 用 `React` 重建 `Overlay`；
+- 把状态展示与错误提示迁入新 UI。
 
-- 阶段 3 完成
+### 阶段 4：发布准备
 
-难度：
+- 输出 `Chrome` 与 `Edge` 构建产物；
+- 执行手工烟测；
+- 整理上架所需图标、描述与打包步骤。
 
-- 中
+## 14. 最终结论
 
-### 阶段 5：结果展示完成
+原有实现文档中“纯手写 `Chrome MV3` 原生扩展”这一路线，已经不再是当前项目的正确目标状态。
 
-目标：
+更新后的正确目标状态是：
 
-- Popup 实时结果渲染
-- Overlay 注入和更新
-- 保留最近 20 条记录
-- 支持 Overlay 关闭和拖动
-
-输出：
-
-- 用户可见的 MVP 交互闭环
-
-前置依赖：
-
-- 阶段 4 完成
-
-难度：
-
-- 低到中
-
-### 阶段 6：配置与可靠性增强
-
-目标：
-
-- 配置持久化
-- 状态恢复
-- 网络错误提示
-- 会话中断恢复
-- 错误日志写入
-
-输出：
-
-- 可持续测试和内部试用的 MVP
-
-前置依赖：
-
-- 阶段 5 完成
-
-难度：
-
-- 中
-
-### 阶段 7：二期增强
-
-目标：
-
-- 说话人分离
-- 多 Provider 并行支持
-- 复杂预处理
-- 服务端代理
-
-输出：
-
-- 增强版本架构
-
-难度：
-
-- 高到很高
-
-## 12. 优先级排序
-
-推荐开发优先级如下：
-
-1. 先验证系统音频是否可采
-2. 再打通识别
-3. 再打通翻译
-4. 再做可视化展示
-5. 最后补配置与可靠性
-
-如果第一步采集链路失败，项目需立刻调整方案，而不是继续实现后续模块。
-
-## 13. 测试策略
-
-首版测试重点不是“全自动化覆盖”，而是优先验证关键链路。
-
-### 13.1 必测链路
-
-1. 扩展可加载
-2. Popup 可启动和停止会话
-3. 可拉起系统分享窗口
-4. 可采集音频并产生分片
-5. 分片可调用识别 API
-6. 识别结果可进入翻译 API
-7. 翻译结果可同步到 Popup 和 Overlay
-
-### 13.2 错误场景
-
-1. 用户拒绝屏幕共享
-2. 未配置 API Key
-3. 网络中断
-4. 第三方 API 4xx
-5. 第三方 API 5xx
-6. Overlay 已关闭但后台仍在运行
-
-## 14. 结论
-
-本项目适合按“先闭环、后增强”的方式推进。
-
-明确结论如下：
-
-1. 当前应按 MVP 路线推进
-2. 说话人分离必须拆到二期
-3. 真正安全的密钥长期持久化不应作为纯扩展 MVP 的强约束
-4. 首轮实现的唯一核心目标，是验证系统音频采集到翻译展示的完整闭环
-
-后续若继续推进，应基于本文档生成详细实施计划，并按阶段逐步落地。
+**以最新 `WXT` 作为工程底座，以 `React` 作为 `Popup / Overlay` 的 UI 层，以现有 MVP 原型验证过的运行时链路作为迁移基础，交付同时面向 `Chrome` 与 `Edge` 的可持续开发版本。**
